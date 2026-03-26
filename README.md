@@ -90,7 +90,7 @@ python PTmodels/sb3net.py
 
 ```bash
 for map in blocks NH; do
-    for HT in base, FP-TMR, RP-TMR, Ranger, Model1, Model2, Model3, SelectiveTMR, PredictionFP-TMR,Prediction RP-TMR; do
+    for HT in base, Ranger, Model1, Model2, Model3, SelectiveTMR, PredictionFP-TMR,Prediction RP-TMR; do
         python tensorrtConversion/torch2trtHT.py --map ${map} --ht ${HT}
     done
 done
@@ -100,7 +100,7 @@ done
 
 ```bash
 for map in blocks NH; do
-    for HT in base, FP-TMR, RP-TMR, Ranger, Model1, Model2, Model3, SelectiveTMR, PredictionFP-TMR,Prediction RP-TMR; do
+    for HT in base, Ranger, Model1, Model2, Model3, SelectiveTMR, PredictionFP-TMR,Prediction RP-TMR; do
         bash complete_HT_profiling.sh ./ConvertedNNs ${map} 10 10 ${HT}
     done
 done
