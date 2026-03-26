@@ -116,21 +116,22 @@ def save_featuremap_shapes(
     return shapes
 
 if __name__ == '__main__':
-    mapUT = 'blocks'
-    pickle_path = f'./{mapUT}/sb3net.p'
-    with open(pickle_path, 'rb') as f:
-        model_arch = pickle.load(f)
-    model = SB3Net(model_arch.cnn_extractor, model_arch.linear_extractor, model_arch.vec_extractor, model_arch.q_net)
-    print(model)
 
-    if mapUT == 'NH':
-        obs_shape = (3, 3,144,256) 
-        vec_shape = (3,12)
-    elif mapUT == 'blocks':
-        obs_shape = (1,4,36,64) 
-        vec_shape = (1,12)
+    for mapUT in ['blocks', 'NH']:
+        pickle_path = f'./PTmodels/{mapUT}/sb3net.p'
+        with open(pickle_path, 'rb') as f:
+            model_arch = pickle.load(f)
+        model = SB3Net(model_arch.cnn_extractor, model_arch.linear_extractor, model_arch.vec_extractor, model_arch.q_net)
+        print(model)
 
-    dummy_obs = torch.randn(*obs_shape).to('cuda')
-    dummy_vec = torch.randn(*vec_shape).to('cuda')
+        if mapUT == 'NH':
+            obs_shape = (3, 3,144,256) 
+            vec_shape = (3,12)
+        elif mapUT == 'blocks':
+            obs_shape = (1,4,36,64) 
+            vec_shape = (1,12)
 
-    save_featuremap_shapes(model, f"{mapUT}/embeddings_shape.json", dummy_obs, dummy_vec)
+        dummy_obs = torch.randn(*obs_shape).to('cuda')
+        dummy_vec = torch.randn(*vec_shape).to('cuda')
+
+        save_featuremap_shapes(model, f"./PTmodels/{mapUT}/embeddings_shape.json", dummy_obs, dummy_vec)

@@ -1,3 +1,7 @@
+from tqdm import tqdm
+import pickle
+from jtop import jtop
+from time import time
 
 import tensorrt as trt
 import pycuda.driver as cuda
@@ -118,3 +122,91 @@ def elementwise_mode3(y1: torch.Tensor, y2: torch.Tensor, y3: torch.Tensor, tol:
     pick_y1 = torch.logical_or(eq12, eq13)
     out = torch.where(pick_y1, y1, torch.where(eq23, y2, y2))
     return out
+
+
+
+def setup(engine_path):
+	# 1) Carica engine e crea contesto
+	engine = load_engine(engine_path)
+
+	context = engine.create_execution_context()
+	if not context:
+		raise RuntimeError("Impossibile creare IExecutionContext.")
+
+	# 4) Alloca buffer H2D/D2H per tutti i binding
+	stream = cuda.Stream()
+
+	bindings_ptrs, host_inout, device_inout = allocate_bindings(engine, context, stream)
+
+	return bindings_ptrs, host_inout, device_inout, context, stream
+
+def run_benchmark(n_calls, func, func_params):
+
+	# initialize benchmarking
+	jetson = jtop() # create benchmark logging thread
+	jetson.start() # start benchmark window
+	start_time = time()
+
+	# make function calls
+	for run in range(n_calls):  
+		func(**func_params)
+
+	# clean up benchmarking
+	latency = time() - start_time
+	jetson.close() # close benchmark logging thread
+	jetson_json = jetson.json()
+	# print(jetson.json()['gpu'])
+
+	return jetson_json, latency
+
+
+def inference(sample_size, bindings_ptrs, host_inout, device_inout, context, stream):
+	for name, meta in host_inout.items():
+		if meta["is_input"]:
+			cuda.memcpy_htod_async(device_inout[name], meta["buffer"], stream)
+	for n in range(sample_size):
+		# H2D per tutti gli input
+
+		# Inference
+		ok = context.execute_v2(bindings_ptrs)
+		if not ok:
+			raise RuntimeError("execute_v2 ha restituito False.")
+
+	# D2H per tutti gli output
+	for name, meta in host_inout.items():
+		if not meta["is_input"]:
+			cuda.memcpy_dtoh_async(meta["buffer"], device_inout[name], stream)
+
+	stream.synchronize()
+
+def benchmark(bindings_ptrs, host_inout, device_inout, context, stream, n_runs, sample_size):
+	for name, meta in host_inout.items():
+		if meta["is_input"]:
+			if name == "obs":
+				meta["buffer"][:] = load_numpy_or_random(obs_npy, meta["shape"], meta["dtype"]).ravel()
+			elif name == "vec":
+				meta["buffer"][:] = load_numpy_or_random(vec_npy, meta["shape"], meta["dtype"]).ravel()
+			else:
+				# per eventuali input addizionali
+				meta["buffer"][:] = load_numpy_or_random(None, meta["shape"], meta["dtype"]).ravel()
+
+	jetson_json, times = run_benchmark(n_runs, 
+										inference, 
+										{
+											'sample_size': sample_size,
+											'bindings_ptrs': bindings_ptrs, 
+											'host_inout': host_inout, 
+											'device_inout': device_inout, 
+											'context': context,
+											'stream': stream
+										})
+	return jetson_json
+
+def save_stats(jetson_json, file_path):
+
+	# print(jetson_json)
+
+	stats = json.loads(jetson_json)
+	
+	with open(file_path, 'w') as f:
+		json.dump(stats, f, indent=4)

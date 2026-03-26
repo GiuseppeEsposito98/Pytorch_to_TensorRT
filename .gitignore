@@ -7,3 +7,4 @@ tensorrtConversion/Calibration/calibration.cache
 tensorrtConversion/Calibration/__pycache__/
 tensorrtConversion/*.log
 data/
+__pycache__

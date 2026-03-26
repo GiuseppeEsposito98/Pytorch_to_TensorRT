@@ -1,12 +1,10 @@
-#!/usr/bin/env python3
 import os
 import re
 import json
 import sys
 import csv
-import argparse
-from pathlib import Path
 from statistics import mean, stdev
+from pathlib import Path
 
 def load_json(path):
     try:
@@ -25,6 +23,7 @@ def get_nested(d, path):
     return cur
 
 def extract_power(payload):
+    """Restituisce potenza in mW."""
     if payload is None: 
         return None
     rails = [
@@ -39,6 +38,7 @@ def extract_power(payload):
     return None
 
 def extract_ram(payload):
+    """RAM in MB."""
     if payload is None:
         return None
     v = get_nested(payload, "mem.RAM.used")
@@ -47,6 +47,7 @@ def extract_ram(payload):
     return None
 
 def extract_latencies(payload):
+    """Estrae tutte le latenze in ms da un file di times."""
     if payload is None:
         return []
     vals = []
@@ -68,52 +69,60 @@ def extract_latencies(payload):
 
 
 
-RUN_NN   = re.compile(r"^NN_(?!times)(.+)\.json$")
+RUN_LAST   = re.compile(r"^last_(?!times)(.+)\.json$")
+RUN_QNET   = re.compile(r"^NN_(?!times)(.+)\.json$")
 
-RUN_NN_T = re.compile(r"^NN_times(?:_(.+))?\.json$")
+RUN_LAST_T = re.compile(r"^last_times(?:_(.+))?\.json$")
+RUN_QNET_T = re.compile(r"^NN_times(?:_(.+))?\.json$")
 
 
 def scan_runs(folder):
     runs = {}
     for f in os.listdir(folder):
-        print(f)
-        m = RUN_NN.match(f)
+        m = RUN_LAST.match(f)
+        if m:
+            rid = m.group(1)
+            runs.setdefault(rid, {})["last"] = os.path.join(folder, f)
+        m = RUN_QNET.match(f)
         if m:
             rid = m.group(1)
             runs.setdefault(rid, {})["NN"] = os.path.join(folder, f)
-        m = RUN_NN_T.match(f)
+        m = RUN_LAST_T.match(f)
+        if m:
+            rid = m.group(1)
+            runs.setdefault(rid, {})["last_t"] = os.path.join(folder, f)
+        m = RUN_QNET_T.match(f)
         if m:
             rid = m.group(1)
             runs.setdefault(rid, {})["NN_t"] = os.path.join(folder, f)
     return runs
 
-def process_folder(folder_path):
-    runs = {}
-    for run_path in [path for path in os.listdir(folder_path) if path.endswith('json')]:
-        run_id = run_path.split('_')[1].split('.')[0]
-        root_run_path = os.path.join(folder_path, run_path)
-        if 'time' in root_run_path:
-            runs.setdefault(0, {})['NN_t'] = root_run_path
-        else:
-            runs.setdefault(run_id, {})['NN'] = root_run_path
+import os
+from statistics import mean, stdev
 
+def process_folder(folder):
+    runs = scan_runs(folder)
     if not runs:
         return None
+
     power_list, ram_list = [], []
 
     # --- 1) POWER & RAM per-run ---
     for rid, paths in runs.items():
-        NN_path = load_json(paths.get("NN"))
+        # prendi i payload last/NN (se ci sono)
+        last = load_json(paths.get("last"))
+        NN = load_json(paths.get("NN"))
 
+        # Somma power e ram dei due payload disponibili
         p = 0.0
         r = 0.0
-        
-        v = extract_power(NN_path)
-        if isinstance(v, float):
-            p += v
-        rv = extract_ram(NN_path)
-        if isinstance(rv, float):
-            r += rv
+        for payload in (last, NN):
+            v = extract_power(payload)
+            if isinstance(v, float):
+                p += v
+            rv = extract_ram(payload)
+            if isinstance(rv, float):
+                r += rv
 
         if p > 0.0:
             power_list.append(p)
@@ -128,12 +137,14 @@ def process_folder(folder_path):
     else:
         power_mean, power_std = mean(power_list), stdev(power_list)
         ram_mean, ram_std = mean(ram_list), stdev(ram_list)
-
+        
     times_paths = set()
     for _, paths in runs.items():
+        if paths.get("last_t"):
+            times_paths.add(paths["last_t"])
         if paths.get("NN_t"):
             times_paths.add(paths["NN_t"])
-    print(times_paths)
+
     latency_samples = []
     for tpath in times_paths:
         latency_samples += extract_latencies(load_json(tpath))
@@ -146,45 +157,50 @@ def process_folder(folder_path):
     else:
         latency_mean, latency_std = mean(latency_samples), stdev(latency_samples)
 
-    energy_mean = power_mean * latency_mean  
+    energy_mean = power_mean * latency_mean 
     energy_std = None
-
-    folder_name = os.path.basename(folder_path)
+    
+    folder_name = os.path.basename(folder)
 
     return (
         folder_name,
-        len(power_list),         
+        len(power_list),  
         power_mean, power_std,
         latency_mean, latency_std,
         ram_mean, ram_std,
         energy_mean, energy_std
     )
     
-
 def main():
+    import argparse
     ap = argparse.ArgumentParser()
-    ap.add_argument("plan_root_path")
-    ap.add_argument("-o", default="metrics.csv")
+    ap.add_argument("root")
+    ap.add_argument("-o", default="out_report/metrics.csv")
     args = ap.parse_args()
 
     rows = []
+    for d, dirs, files in os.walk(args.root):
+        if any(re.match(r"(last|NN|last_times|NN_times)_", f) for f in files):
+            res = process_folder(d)
+            if res:
+                rows.append(res)
 
-    res = process_folder(args.plan_root_path)
-    rows.append(res)
-
-    out_path = Path(args.o).mkdir(parents=True, exist_ok=True)
-
-    with open(os.path.join(args.o, 'report.csv'), "w", newline="") as f:
-        w = csv.writer(f)
-        w.writerow([
-            "folder", "runs",
-            "power_mean_mW", "power_std_mW",
-            "latency_mean_ms", "latency_std_ms",
-            "ram_mean_MB", "ram_std_MB",
-            "energy_mean_uJ", "energy_std_uJ"
-        ])
-        for r in rows:
-            w.writerow(r)
+    out_folder = "/".join(args.o.split('/')[:-1])
+    Path(out_folder).mkdir(parents=True, exist_ok=True)
+    if not os.path.exists(args.o):
+        with open(args.o, "w", newline="") as f:
+            w = csv.writer(f)
+            w.writerow([
+                "folder", "runs",
+                "power_mean_mW", "power_std_mW",
+                "latency_mean_ms", "latency_std_ms",
+                "ram_mean_MB", "ram_std_MB",
+                "energy_mean_uJ", "energy_std_uJ"
+            ])
+    
+    with open(args.o, "a", newline="") as f:
+            w = csv.writer(f)
+            w.writerow(rows[0])
 
     print(f"Done. Wrote {len(rows)} rows to {args.o}")
 

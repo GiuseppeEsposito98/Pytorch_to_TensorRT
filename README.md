@@ -28,24 +28,83 @@ pip install tqdm
 pip install jetson-stats
 ```
 
+5. Clone the github repo
+```bash
+git clone https://github.com/GiuseppeEsposito98/TensorRTProfiling.git
+```
+
 5. Setup the Python environment variable
 
 ```bash
-cd ~
+cd ~/TensorRTProfiling
 PWD=`pwd`
 export PYTHONPATH="$PWD"
 ```
 
-## Usage
+## Usage: export and profile baseline NN architecture
+Available data formats:
+- FP16
+- INT8
 
 1. Run the script tensorrtConversion/torch2trt.py with the desired data type and the desired map
 ```bash
-python tensorrtConversion/torch2trt.py --format FP16 --map NH
+for map in blocks NH; do
+    for format in FP16 INT8; do
+        python tensorrtConversion/torch2trt.py --format ${format} --map ${map}
+    done
+done
 ```
 
 2. Profile energy on the model for autonomous drone navigation trained for Airsim Neighbourhood map, on 10 runs, 10 samples exported in the FP16 format.
 ```bash
-bash complete_profiling.sh ./ConvertedNNs NH 10 10 FP16
+for map in blocks NH; do
+    for format in FP16 INT8; do
+        bash complete_profiling.sh ./ConvertedNNs ${map} 10 10 ${format}
+    done
+done
 ```
 
-3. You will find the final report in out_report/NH/report.csv
+3. You will find the final report in out_report folder. 
+4. The per-layer profiling details are available in the NN.json file which is in the folder corresponding to your test case.
+
+## Usage: Evaluate the HT configurations
+
+Available HT configurations: 
+- base, 
+- FP-TMR (SOTA), 
+- RP-TMR (SOTA), 
+- Ranger (SOTA), 
+- Model1 (This work), 
+- Model2 (This work), 
+- Model3 (This work), 
+- Selective TMR (SOTA), 
+- Prediction FP-TMR (SOTA), 
+- Prediction RP-TMR (SOTA).
+
+0. Profile the NN layers input and output shapes
+```bash
+python PTmodels/sb3net.py
+```
+
+1. Run the script tensorrtConversion/torch2trt.py with the desired map to export all the available HT configurations. 
+
+```bash
+for map in blocks NH; do
+    for HT in base, FP-TMR, RP-TMR, Ranger, Model1, Model2, Model3, Model4, SelectiveTMR, PredictionFP-TMR,Prediction RP-TMR; do
+        python tensorrtConversion/torch2trtHT.py --map ${map} --ht ${HT}
+    done
+done
+```
+
+2. In case you want to profile all the available HT configurations over 10 runs of inferences on 10 samples
+
+```bash
+for map in blocks NH; do
+    for HT in base, FP-TMR, RP-TMR, Ranger, Model1, Model2, Model3, Model4, SelectiveTMR, PredictionFP-TMR,Prediction RP-TMR; do
+        bash complete_HT_profiling.sh ./ConvertedNNs ${map} 10 10 ${HT}
+    done
+done
+```
+
+3. You will find the final report in out_report folder.
+4. The per-layer profiling details are available in the NN.json file which is in the folder corresponding to your test case.
